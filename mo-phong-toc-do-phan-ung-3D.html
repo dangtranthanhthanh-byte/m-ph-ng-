@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mô phỏng 3D – Các yếu tố ảnh hưởng tốc độ phản ứng</title>
+<style>
+:root{--bg:#eaf0ee;--card:#fff;--ink:#17201d;--muted:#617069;--accent:#197a65;--soft:#e6f3ef;--line:#d4dfdb}
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:14px;height:100%;padding:14px}
+.stage{position:relative;min-width:0;background:#17252d;border-radius:14px;overflow:hidden}
+canvas{display:block;width:100%;height:100%}.top{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;gap:10px;z-index:5}
+.tools{display:flex;gap:7px;flex-wrap:wrap}.tool,.btn{border:1px solid rgba(255,255,255,.28);background:rgba(11,20,20,.72);color:#fff;border-radius:8px;padding:7px 11px;cursor:pointer;font:inherit}
+.eq{position:absolute;left:12px;top:58px;max-width:calc(100% - 24px);background:rgba(11,20,20,.76);color:#fff;padding:9px 13px;border-radius:9px;z-index:5}
+.eq .label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#9ee1d1}.eq .formula{font-weight:700;font-size:18px}
+.hud{position:absolute;left:12px;bottom:12px;background:rgba(11,20,20,.72);color:#fff;border-radius:8px;padding:8px 11px;z-index:5}.hint{position:absolute;right:12px;bottom:12px;color:#fff;background:rgba(11,20,20,.45);padding:4px 8px;border-radius:6px;font-size:12px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;overflow:auto}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-weight:700}.panel h1{font-size:24px;line-height:1.2;margin:5px 0 14px}
+.chaps{display:flex;flex-direction:column;gap:4px;margin-bottom:15px}.chap{display:flex;gap:9px;align-items:center;border:0;background:transparent;border-radius:8px;padding:7px 8px;text-align:left;cursor:pointer;font:inherit}.chap:hover{background:#f1f5f3}.chap.active{background:var(--soft);color:var(--accent);font-weight:700}.num{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line);font-size:12px}.active .num{background:var(--accent);color:#fff;border-color:var(--accent)}
+.detail{border-top:1px solid var(--line);padding-top:15px}.detail h2{font-size:21px;margin:4px 0 10px}.detail p{margin:9px 0}.box{background:#f2f6f4;border-radius:9px;padding:10px 12px;margin:10px 0}.slider{margin:12px 0}.slider label{display:flex;justify-content:space-between;font-weight:600;margin-bottom:4px}.slider output{color:var(--accent)}input[type=range]{width:100%;accent-color:var(--accent)}
+.rows{display:grid;gap:7px}.row{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 0}.row b{font-variant-numeric:tabular-nums}.btn{background:var(--accent);border-color:var(--accent)}.ghost{background:transparent;color:var(--accent)}
+.nav{display:flex;justify-content:space-between;gap:8px;margin-top:13px}
+@media(max-width:960px){.app{grid-template-columns:1fr;height:auto}.stage{height:62vh;min-height:410px}.panel{overflow:visible}.hint{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+<section class="stage" id="stage">
+<canvas id="cv" aria-label="Mô phỏng 3D các yếu tố ảnh hưởng tốc độ phản ứng"></canvas>
+<div class="top"><div class="tools">
+<button class="tool" id="play">Tạm dừng</button><button class="tool" id="reset">Phát lại</button><button class="tool" id="labels">Ẩn nhãn</button>
+</div><div class="tools"><button class="tool" id="prev">←</button><span class="tool" id="page">1 / 5</span><button class="tool" id="next">→</button></div></div>
+<div class="eq" id="eq"></div><div class="hud" id="hud"></div><div class="hint">Kéo để xoay · Cuộn để phóng to</div>
+</section>
+<aside class="panel">
+<div class="eyebrow">Hóa học 10 · Tốc độ phản ứng</div>
+<h1>Các yếu tố ảnh hưởng đến tốc độ phản ứng</h1>
+<nav class="chaps" id="chaps"></nav>
+<section class="detail" id="detail"></section>
+</aside>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(()=>{'use strict';
+const $=s=>document.querySelector(s), cv=$('#cv'),stage=$('#stage');
+const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+const camera=new THREE.PerspectiveCamera(45,1,.1,200), controls=new THREE.OrbitControls(camera,cv); controls.enableDamping=true;
+const clock=new THREE.Clock(); let playing=true,showLabels=true,t=0,current=0;
+const rand=(a,b)=>a+Math.random()*(b-a), V=(x,y,z)=>new THREE.Vector3(x,y,z), clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const scenes=[];
+function textSprite(text,color='#ffffff',scale=.58){
+ const c=document.createElement('canvas'),x=c.getContext('2d');x.font='700 28px system-ui';const w=x.measureText(text).width+24;c.width=w;c.height=46;
+ x.fillStyle='rgba(0,0,0,.68)'; if(x.roundRect){x.roundRect(0,0,w,46,12)} else x.fillRect(0,0,w,46); x.fill();
+ x.fillStyle=color;x.font='700 28px system-ui';x.fillText(text,12,31);
+ const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false}));s.scale.set(scale*w/46,scale,1);return s;
+}
+function base(bg=0x183039){const s=new THREE.Scene();s.background=new THREE.Color(bg);s.add(new THREE.HemisphereLight(0xffffff,0x354047,1));const d=new THREE.DirectionalLight(0xffffff,.8);d.position.set(5,10,8);s.add(d);return s}
+function mol(scene,type,pos,color,rad=.25,label=true){const g=new THREE.Group();const core=new THREE.Mesh(new THREE.SphereGeometry(rad,20,14),new THREE.MeshStandardMaterial({color,roughness:.35}));g.add(core);
+ if(label){const sp=textSprite(type);sp.position.y=rad+0.35;g.add(sp)} g.position.copy(pos);scene.add(g);return g}
+function makeBeads(scene,n,region,fast=1.5){
+ const a=[]; for(let i=0;i<n;i++){const p=V(rand(region[0],region[1]),rand(region[2],region[3]),rand(region[4],region[5]));const g=mol(scene,'A',p,0x4b8bc4,.22,false);g.userData.v=V(rand(-1,1),rand(-1,1),rand(-1,1)).normalize().multiplyScalar(rand(.4,1)*fast);a.push(g)}return a
+}
+function chamber(scene,x=0,y=2.2,w=10,h=4.3,d=6){
+ const m=new THREE.MeshPhongMaterial({color:0x8cc6d8,transparent:true,opacity:.13,side:THREE.DoubleSide,depthWrite:false});
+ const g=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);g.position.set(x,y,0);scene.add(g);return g
+}
+function tickParticles(a,dt,box){
+ a.forEach(g=>{g.position.addScaledVector(g.userData.v,dt);const p=g.position;if(p.x<box[0]||p.x>box[1])g.userData.v.x*=-1;if(p.y<box[2]||p.y>box[3])g.userData.v.y*=-1;if(p.z<box[4]||p.z>box[5])g.userData.v.z*=-1;g.rotation.y+=dt;});
+}
+function sceneTemperature(){
+ const s=base(0x202934), a=makeBeads(s,36,[-4,4,.4,4,-2.5,2.5]), flame=mol(s,'🔥',V(0,-.1,0),0xff8a2a,.55,false);
+ chamber(s,0,2.2,10,4.2,6); const st={T:25,coll:0,rate:0};
+ return {scene:s,eq:'A + B → sản phẩm',title:'Nhiệt độ',group:'Ảnh hưởng đến tốc độ',cam:[V(11,7,16),V(0,2,0)],
+ update(dt){const f=clamp((st.T-25)/75,0,1),speed=.7+3.5*f;flame.scale.set(1,1+f*1.8,1);a.forEach(g=>g.userData.v.setLength(rand(.5,1.1)*speed));tickParticles(a,dt,[-4.6,4.6,.1,4.3,-2.6,2.6]);st.coll=Math.round(20+f*160);st.rate=+(0.3+f*2.7).toFixed(2)},
+ panel(){return `<p>Khi tăng nhiệt độ, các hạt chuyển động nhanh hơn → số va chạm hiệu quả trong một đơn vị thời gian tăng → tốc độ phản ứng tăng.</p><div class="slider"><label>Nhiệt độ <output id="v">${st.T} °C</output></label><input id="s" type="range" min="25" max="100" value="${st.T}"></div><div class="box rows"><div class="row"><span>Va chạm hiệu quả / giây</span><b data-r="c">${st.coll}</b></div><div class="row"><span>Tốc độ tương đối</span><b data-r="r">${st.rate}×</b></div></div><div class="box">Câu hỏi: Vì sao đun nóng thường làm phản ứng xảy ra nhanh hơn?</div>`},
+ bind(root){root.querySelector('#s').oninput=e=>{st.T=+e.target.value;root.querySelector('#v').textContent=st.T+' °C'}},
+ refresh(root){root.querySelector('[data-r="c"]').textContent=st.coll;root.querySelector('[data-r="r"]').textContent=st.rate+'×'},reset(){st.T=25}
+}}
+function sceneConcentration(){
+ const s=base(0x20313b); chamber(s,0,2.3,10,4.4,6); const a=[],b=[];for(let i=0;i<12;i++)a.push(mol(s,'A',V(rand(-4,4),rand(.5,4),rand(-2.5,2.5)),0x4b8bc4,.22,false));
+ for(let i=0;i<20;i++)b.push(mol(s,'B',V(rand(-4,4),rand(.5,4),rand(-2.5,2.5)),0xd65a53,.22,false));
+ const st={c:50,hits:0};
+ return {scene:s,eq:'A + B → sản phẩm',title:'Nồng độ',group:'Ảnh hưởng đến tốc độ',cam:[V(11,7,16),V(0,2,0)],
+ update(dt){const f=st.c/100; b.forEach((g,i)=>{g.visible=i<Math.round(6+f*14)});st.hits=Math.round(25+f*175);tickParticles(a.concat(b.filter(g=>g.visible)),dt,[-4.6,4.6,.1,4.4,-2.6,2.6])},
+ panel(){return `<p>Tăng nồng độ làm tăng số hạt trong cùng một thể tích → các hạt gặp nhau thường xuyên hơn → tốc độ phản ứng tăng.</p><div class="slider"><label>Nồng độ B <output id="v">${st.c}%</output></label><input id="s" type="range" min="10" max="100" value="${st.c}"></div><div class="box rows"><div class="row"><span>Số hạt B đang có</span><b data-r="n">${b.filter(g=>g.visible).length}</b></div><div class="row"><span>Va chạm tương đối</span><b data-r="h">${st.hits}</b></div></div><div class="box">Câu hỏi: Vì sao cùng thể tích dung dịch đậm đặc thường phản ứng nhanh hơn dung dịch loãng?</div>`},
+ bind(root){root.querySelector('#s').oninput=e=>{st.c=+e.target.value;root.querySelector('#v').textContent=st.c+'%'}},
+ refresh(root){root.querySelector('[data-r="n"]').textContent=b.filter(g=>g.visible).length;root.querySelector('[data-r="h"]').textContent=st.hits},reset(){st.c=50}}
+}
+function sceneSurface(){
+ const s=base(0x29343c), big=[],small=[];chamber(s,0,2.4,11,4.6,7);
+ for(let i=0;i<10;i++)big.push(mol(s,'A',V(rand(-4.2,4.2),rand(.5,4.2),rand(-3,3)),0x4b8bc4,.42,false));
+ for(let i=0;i<28;i++)small.push(mol(s,'A',V(rand(-4.2,4.2),rand(.5,4.2),rand(-3,3)),0x4b8bc4,.18,false));
+ const st={size:1,hits:0};
+ return {scene:s,eq:'Rắn + acid → sản phẩm',title:'Diện tích bề mặt',group:'Ảnh hưởng đến tốc độ',cam:[V(12,8,17),V(0,2,0)],
+ update(dt){const f=st.size; const active=f<.5?small:big; big.forEach(g=>g.visible=f>=.5); small.forEach(g=>g.visible=f<.5);st.hits=f<.5?210:72;tickParticles(active.filter(g=>g.visible),dt,[-4.6,4.6,.1,4.4,-3.2,3.2])},
+ panel(){return `<p>Chất rắn được chia nhỏ có diện tích bề mặt tiếp xúc lớn hơn với chất phản ứng → số va chạm xảy ra trên bề mặt tăng → phản ứng nhanh hơn.</p><div class="slider"><label>Kích thước hạt <output id="v">${st.size<.5?'Nhỏ':'Lớn'}</output></label><input id="s" type="range" min="0" max="1" step="1" value="${st.size}"></div><div class="box rows"><div class="row"><span>Va chạm tương đối</span><b data-r="h">${st.hits}</b></div></div><div class="box">Ví dụ: viên kẽm lớn và bột kẽm phản ứng với cùng dung dịch acid.</div>`},
+ bind(root){root.querySelector('#s').oninput=e=>{st.size=+e.target.value;root.querySelector('#v').textContent=st.size?'Lớn':'Nhỏ'}},
+ refresh(root){root.querySelector('[data-r="h"]').textContent=st.hits},reset(){st.size=1}}
+}
+function sceneCatalyst(){
+ const s=base(0x223038), a=makeBeads(s,32,[-4,4,.5,4,-2.5,2.5]); chamber(s,0,2.2,10,4.2,6);
+ const cat=mol(s,'X',V(0,1.3,0),0xe2c044,.48,true); const st={cat:true,rate:1.0};
+ return {scene:s,eq:'A + B —X→ sản phẩm',title:'Chất xúc tác',group:'Ảnh hưởng đến tốc độ',cam:[V(11,7,16),V(0,2,0)],
+ update(dt){st.rate=st.cat?3.1:1.0;const boost=st.cat?2.7:1;a.forEach(g=>g.userData.v.multiplyScalar(Math.pow(boost,dt)));tickParticles(a,dt,[-4.6,4.6,.1,4.3,-2.6,2.6])},
+ panel(){return `<p>Chất xúc tác cung cấp con đường phản ứng thuận lợi hơn (năng lượng hoạt hóa thấp hơn), làm tăng tốc độ phản ứng và được tái sinh sau phản ứng.</p><div class="box"><label><input id="s" type="checkbox" ${st.cat?'checked':''}> Có chất xúc tác X</label></div><div class="box rows"><div class="row"><span>Tốc độ tương đối</span><b data-r="r">${st.rate}×</b></div></div><div class="box">Câu hỏi: Chất xúc tác có bị tiêu hao hoàn toàn sau phản ứng không?</div>`},
+ bind(root){root.querySelector('#s').onchange=e=>st.cat=e.target.checked},
+ refresh(root){root.querySelector('[data-r="r"]').textContent=st.rate+'×'},reset(){st.cat=true}}
+}
+function sceneSummary(){
+ const s=base(0xa8c7d5);const ground=new THREE.Mesh(new THREE.PlaneGeometry(34,24),new THREE.MeshLambertMaterial({color:0x83a55f}));ground.rotation.x=-Math.PI/2;s.add(ground);
+ const fire=mol(s,'🔥',V(-7,1,0),0xff8a2a,.8,false),beaker=new THREE.Mesh(new THREE.CylinderGeometry(3,3,4,32,1,true),new THREE.MeshPhongMaterial({color:0x8cc6d8,transparent:true,opacity:.22,side:THREE.DoubleSide}));beaker.position.set(2,2,0);s.add(beaker);
+ const st={T:50,c:50,small:true,cat:true};
+ return {scene:s,eq:'T ↑  ·  c ↑  ·  S ↑  ·  X →  tốc độ ↑',eqLabel:'Tổng hợp',title:'Tổng hợp',group:'Vận dụng',cam:[V(8,9,22),V(0,2,0)],
+ update(dt){fire.scale.y=1+st.T/100;if(!st.small)beaker.scale.x=1.05;},
+ panel(){return `<p>Trong thực tế có thể đồng thời thay đổi nhiều yếu tố. Hãy dự đoán yếu tố nào làm phản ứng nhanh hơn trong từng tình huống và giải thích bằng mô hình va chạm.</p><div class="box rows"><div class="row"><span>Nhiệt độ</span><b>${st.T} °C</b></div><div class="row"><span>Nồng độ</span><b>${st.c}%</b></div><div class="row"><span>Chất rắn</span><b>${st.small?'Đã nghiền nhỏ':'Miếng lớn'}</b></div><div class="row"><span>Xúc tác</span><b>${st.cat?'Có':'Không'}</b></div></div><div class="box">Câu hỏi vận dụng: Vì sao nghiền nhỏ chất rắn, tăng nhiệt độ hoặc tăng nồng độ thường làm phản ứng nhanh hơn?</div>`},
+ bind(){},refresh(){},reset(){}}
+}
+scenes.push(sceneTemperature(),sceneConcentration(),sceneSurface(),sceneCatalyst(),sceneSummary());
+const chapters=['Nhiệt độ','Nồng độ','Diện tích bề mặt','Chất xúc tác','Tổng hợp'];
+$('#chaps').innerHTML=chapters.map((x,i)=>`<button class="chap ${i===0?'active':''}" data-i="${i}"><span class="num">${i+1}</span><span>${x}</span></button>`).join('');
+$('#chaps').onclick=e=>{const b=e.target.closest('.chap');if(b)show(+b.dataset.i)};
+function labels(){scenes.forEach(o=>o.scene.traverse(x=>{if(x.isSprite)x.visible=showLabels}))}
+function show(i){current=(i+scenes.length)%scenes.length;const o=scenes[current];$('#page').textContent=`${current+1} / ${scenes.length}`;$('#eq').innerHTML=`<div class="label">${o.eqLabel||'Phản ứng / mô hình'}</div><div class="formula">${o.eq}</div>`;$('#detail').innerHTML=`<div class="eyebrow">${o.group} · Cảnh ${current+1}/${scenes.length}</div><h2>${o.title}</h2>${o.panel()}<div class="nav"><button class="btn ghost" id="back">← Cảnh trước</button><button class="btn" id="forward">Cảnh tiếp →</button></div>`;$('#back').onclick=()=>show(current-1);$('#forward').onclick=()=>show(current+1);o.bind($('#detail'));document.querySelector('.chap.active')?.classList.remove('active');document.querySelector(`.chap[data-i="${current}"]`).classList.add('active');camera.position.copy(o.cam[0]);controls.target.copy(o.cam[1]);controls.minDistance=7;controls.maxDistance=45;labels();resize()}
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/Math.max(1,h);camera.updateProjectionMatrix()}
+new ResizeObserver(resize).observe(stage);resize();show(0);
+$('#play').onclick=e=>{playing=!playing;e.target.textContent=playing?'Tạm dừng':'Tiếp tục'};$('#reset').onclick=()=>scenes[current].reset();$('#labels').onclick=e=>{showLabels=!showLabels;e.target.textContent=showLabels?'Ẩn nhãn':'Hiện nhãn';labels()};$('#prev').onclick=()=>show(current-1);$('#next').onclick=()=>show(current+1);
+document.addEventListener('keydown',e=>{if(e.target.closest('input'))return;if(e.key==='ArrowRight')show(current+1);if(e.key==='ArrowLeft')show(current-1)});
+function loop(){requestAnimationFrame(loop);const dt=playing?Math.min(clock.getDelta(),.05):0;t+=dt;const o=scenes[current];o.update(dt,t);o.refresh($('#detail'));controls.update();renderer.render(o.scene,camera)}loop();
+})();
+</script>
+</body></html>
